@@ -1,0 +1,6 @@
+{
+    "configuration": "pnum=GENERIC_F070CBTX,upload_method=dfuMethod,xserial=generic,usb=CDCgen,opt=osstd,dbg=none,rtlib=nano",
+    "board": "STMicroelectronics:stm32:GenF0",
+    "port": "/dev/ttyACM0",
+    "sketch": "DW1000Ranging_ANCHOR.ino"
+}
