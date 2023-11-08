@@ -1,19 +1,33 @@
 # DW1000_HARE
 
-Library of basic functionalities for Decawave's DW1000 chips/modules with Arduino -- edited for use with HARE lab projects. (DW1000 - https://www.decawave.com/products/dwm1000-module) Continued from DW1000 library by thotro (see https://github.com/thotro/arduino-dw1000)
+Library of basic functionalities for Decawave's DW1000 chips/modules with Arduino -- edited for use with HARE lab projects. (DW1000 - https://www.decawave.com/products/dwm1000-module)
+
+UWB Nodes used comprise the Loco Positioning System (see https://www.bitcraze.io/products/loco-positioning-node/)
+
+Manual DW1000 source pulled from library by thotro (see https://github.com/thotro/arduino-dw1000).
 
 ## License
 
 Apache 2.0 (see LICENSE)
 
-## Operation Instructions for DW1000 connected to Loco Positioning Node
+## Configuring the Loco Positioning System Nodes for TDoA3
+
+Time Difference of Arrival (TDoA) is a ranging setup in which a series of static anchors exchange ranging messages and a sniffer node "sniffs" or listens to these messages.
+
+(Configuring the LPS via Console Menu): Through a simple serial connection an LPS node can be configured on a serial console. With a device connected and its port known, you can use the command "picocom /dev/'PORT'" in your terminal. Further instructions can be found here: https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/development/anchor-low-level-config/
+
+(TDoA3 Configuration): The anchors and sniffer must be configured to the same bitrate and preamble length. By default, these are both "normal". This can be changed in the console menu.
+
+(For TDoA3 Long Range): The anchors need to be configured with the radio mode "low bitrate, normal preamble" as well as TX power set to max. Instructions for how to achieve this are located here: https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/user-guides/tdoa3_long_range/
+
+
+## Operation Instructions for direct programming on the LPS Nodes (i.e. not using proprietary modes and software)
 
 (Loco Positioning Node - https://www.bitcraze.io/products/loco-positioning-node/)
 
 The DW1000 Loco Positioning Node (hereafter referred to as simply the "node") operates using an STM32 microprocessor. Interfacing with this processor can be performed within the Arduino IDE provided you install the STM32duino extension. Similarly, interfacing with this processor can be accomplished in Visual Studio Code with the Arduino extension + the STM32duino add-on.
 
 You will also need the STM32 Cube Programmer, downloaded separately.
-
 
 Settings for downloading software to the node via Arduino IDE are undertaken as follows:
 1: Connect the node to your system via USB. Port connectivity can be checked in the Tools tab of the Arduino IDE, or in your dev folder if you are on a Linux platform.
