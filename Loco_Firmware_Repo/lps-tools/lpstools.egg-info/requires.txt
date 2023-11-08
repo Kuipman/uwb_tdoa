@@ -1,0 +1,5 @@
+pyserial~=3.4
+pyusb~=1.0.2
+
+[pyqt5]
+pyqt5==5.15
