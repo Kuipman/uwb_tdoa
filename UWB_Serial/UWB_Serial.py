@@ -1,3 +1,10 @@
+## UWB_Serial.py
+## 
+## Purpose: Read serial input from a TDoA sniffer node, record and parse payload from each respective
+##      TDoA anchor node, and output data into a ROS2 message
+## Author: Nicholas Kuipers
+##
+##
 
 # Library Imports
 import serial
@@ -33,4 +40,5 @@ else:
 
 # close the serial port -- end program
 ser.close()
+
 
