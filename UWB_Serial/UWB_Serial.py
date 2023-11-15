@@ -14,7 +14,6 @@ from time import sleep  # allows for setting rate of TDoA packet gathering
 
 ###########      Adjustable Values     #############
 Debug    = True         # Set this to true for additional console outputs and data
-arr_cols = 10000        # notional size of array storing TDOA objects, can be adjusted as needed
 slp_millis = 50         # number of milliseconds between each time a TDoA object is recorded and stored
 
 
@@ -40,12 +39,9 @@ else:
     print("Serial Assignment Successful.")
     print(ser)   # verify serial port settings and activation   
 
-# REMOVE LATER
-newTDOA = TDOA_Range()
-
 # Main loop - skips over certain amount of messages before recording valid TDoA
 while True:
-    # newTDOA = TDOA_Range()
+    newTDOA = TDOA_Range()
     currentLine = ser.readline()
     newLine = currentLine.split()
     if len(newLine) < 6:
