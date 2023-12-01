@@ -17,6 +17,13 @@ import binascii
 import yaml
 import time
 
+# Global variables and Define values
+unit = 'meters'      # we always want meters
+ANTENNA_OFFSET = 154.6
+LOCODECK_TS_FREQ = 499.2e6 * 128
+SPEED_OF_LIGHT = 299792458.0
+M_PER_TICK = SPEED_OF_LIGHT / LOCODECK_TS_FREQ
+
 # Read a line from the serial port and pass it on
 
 """
@@ -127,8 +134,27 @@ while True:
             else:
                 packet["lpp_data"] = packet["data"][anchor_data_index:]
 
+    data = {'id': packet['from'], 'tof': {}}
+
+    for remote in packet['remoteAnchorData']:
+        if 'distance' in remote:
+            tof = remote['distance']
+            remote_id = remote['id']
+            if unit == 'ticks':
+                data['tof'][remote_id] = tof
+            if unit == 'meters':
+                data['tof'][remote_id] = tof * M_PER_TICK - ANTENNA_OFFSET
+
+    print(data['tof'])
+
     print("---")
-    print(yaml.dump(packet, Dumper=yaml.Dumper))
+    print(yaml.dump(data, Dumper=yaml.Dumper))
+
+
+
+# DEBUG Part 2
+    # print("---")
+    # print(yaml.dump(packet, Dumper=yaml.Dumper))
 
 # DEBUG: Prints the current line to the yaml file defined in the line argument
     # print("-----")
