@@ -13,9 +13,10 @@ tof/meter measurements usable by a separate multilateration system enabling UWB 
 import sys
 import struct
 import serial
-import binascii
 import yaml
 import time
+import rclpy
+from rclpy.node import Node
 
 # Global variables and Define values
 unit = 'meters'      # we always want meters
@@ -26,19 +27,16 @@ M_PER_TICK = SPEED_OF_LIGHT / LOCODECK_TS_FREQ
 
 # Read a line from the serial port and pass it on
 
-"""
-if len(sys.argv) < 2:
+
+if len(sys.argv) < 1:
     print("usage: {} <sniffer serial port> [format]".format(sys.argv[0]))
-    print("Please enter 'yaml'")
     sys.exit(1)
 
 ser = serial.Serial(sys.argv[1], 9600)
-"""
-ser = serial.Serial('/dev/ttyACM0', 9600)   # remove when not debugging
+# ser = serial.Serial('/dev/ttyACM0', 9600)   # remove when not debugging
 
-outputFormat = 'human'
-if len(sys.argv) > 2:
-    outputFormat = sys.argv[2].strip()
+if len(sys.argv) > 1:
+    outputFormat = sys.argv[1].strip()
 
 # Switch to binary mode
 ser.write(b'b')
@@ -134,94 +132,19 @@ while True:
             else:
                 packet["lpp_data"] = packet["data"][anchor_data_index:]
 
-    data = {'id': packet['from'], 'tof': {}}
-
+# Finally, calculate the distance between the two anchors in meters
+    packet['tof'] = {}
     for remote in packet['remoteAnchorData']:
         if 'distance' in remote:
             tof = remote['distance']
             remote_id = remote['id']
             if unit == 'ticks':
-                data['tof'][remote_id] = tof
+                packet['tof'][remote_id] = tof
             if unit == 'meters':
-                data['tof'][remote_id] = tof * M_PER_TICK - ANTENNA_OFFSET
-
-    print(data['tof'])
+                packet['tof'][remote_id] = tof * M_PER_TICK - ANTENNA_OFFSET
 
     print("---")
-    print(yaml.dump(data, Dumper=yaml.Dumper))
-
-
-
-# DEBUG Part 2
-    # print("---")
-    # print(yaml.dump(packet, Dumper=yaml.Dumper))
-
-# DEBUG: Prints the current line to the yaml file defined in the line argument
-    # print("-----")
-    # print(yaml.dump({'ts': ts, 'from': addrFrom,
-    #                 'to': addrTo, 'data': data, 'rxSys': rxSys},
-    #                 Dumper=yaml.Dumper))
-    
-
-
+    print(yaml.dump(packet, Dumper=yaml.Dumper))
 
     # At end of file, reset the binary Flag so the next line can be read
     binaryFlag = False
-
-
-
-
-"""
-id = addrFrom
-    packetType = data[0]
-
-    if packetType == 0x30:       # 0x30 = 48 in decimal
-        decoded = struct.unpack("<BBLB", data[:7])
-        sequence = decoded[1]
-        txTimeStamp = decoded[2]
-        remote_count = decoded[3]
-        remoteAnchorData = []
-        anchor_data_index = 7
-
-        for i in range(remote_count):
-            decoded_anchor_data = struct.unpack('<BBL', data[anchor_data_index:(anchor_data_index + 6)])
-            seq = decoded_anchor_data[1] & 0x7f
-            anchor_data = {
-                'id': decoded_anchor_data[0],
-                'seq': sequence,
-                'rxTimeStamp': decoded_anchor_data[2],
-            }
-            anchor_data_index += 6
-
-            has_distance = ((decoded_anchor_data[1] & 0x80) != 0)
-            if (has_distance):
-                decoded_distance = struct.unpack(
-                        '<H', 
-                        data[anchor_data_index:(anchor_data_index + 2)])
-                anchor_data['distance'] = decoded_distance[0]
-                anchor_data_index += 2
-
-            remoteAnchorData.append(anchor_data)
-
-            if len(data) > anchor_data_index:
-                if data[anchor_data_index] == 0xf0 and \
-                        data[anchor_data_index + 1] == 0x01:
-                    lpp_data = {}
-                    lpp_data['header'] = data[anchor_data_index]
-                    anchor_data_index += 1
-
-                    lpp_data['type'] = data[anchor_data_index]
-                    anchor_data_index += 1
-
-                    decoded = struct.unpack(
-                        "<fff",
-                        data[anchor_data_index:anchor_data_index + 3 * 6]
-                    )
-                    lpp_data['position'] = {}
-                    lpp_data['position']['x'] = decoded[0]
-                    lpp_data['position']['y'] = decoded[1]
-                    lpp_data['position']['z'] = decoded[2]
-                    anchor_data_index += 3 * 6
-                else:
-                    lpp_data = data[anchor_data_index]
-"""
