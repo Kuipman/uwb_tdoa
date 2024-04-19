@@ -7,7 +7,7 @@ from bindings.util.loco_utils import read_loco_anchor_positions
 
 def test_kalman_core_with_tdoa3():
     # Fixture
-    fixture_base = 'test_python/fixtures/kalman_core'
+    fixture_base = 'test_python/fixtures/kalman_core' # gives anchor positions and location for log information
     anchor_positions = read_loco_anchor_positions(fixture_base + '/anchor_positions.yaml')
     runner = SdCardFileRunner(fixture_base + '/log05')
     emulator = EstimatorKalmanEmulator(anchor_positions)

@@ -1,8 +1,10 @@
 """
-tdoa3_hare.py
+tdoa3_hare_v2.py
 
 A script to parse the incoming byte stream from the LPS node in "sniffer" mode to readable
-tof/meter measurements usable by a separate multilateration system enabling UWB localization.
+tof/meter measurements, which are then fed into a Kalman filter-based multilateration system.
+The resulting output is a yaml file containing timestamps and approximate xyz coordinates of
+the node.
 """
 
 # Note: LPS node should already be in sniffer mode. Consult LPS documentation https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/development/anchor-low-level-config/
@@ -15,21 +17,30 @@ import struct
 import serial
 import yaml
 import time
+# Kalman Filter
+import numpy as np
+from bindings.util.estimator_kalman_emulator import EstimatorKalmanEmulator
+from bindings.util.sd_card_file_runner import SdCardFileRunner
+from bindings.util.loco_utils import read_loco_anchor_positions
 # ROS2
 import rclpy    # don't forget to source your ROS2 configuration, else this will return an error
 from rclpy.node import Node
 
 ## Global variables and Define values
-unit = 'meters'      # can be either 'ticks' or 'meters'
+unit = 'meters'      # we always want meters
 ANTENNA_OFFSET = 154.6
 LOCODECK_TS_FREQ = 499.2e6 * 128
 SPEED_OF_LIGHT = 299792458.0
 M_PER_TICK = SPEED_OF_LIGHT / LOCODECK_TS_FREQ
 
+# Define the fixture: this gives your static anchor positions and a location to log information
+fixture_base = 'sniffer/fixtures/kalman_core'
+
 ## Read a line from the serial port and pass it on
 if len(sys.argv) < 1:
     print("usage: {} <sniffer serial port> [format]".format(sys.argv[0]))
     sys.exit(1)
+
 ser = serial.Serial(sys.argv[1], 9600)
 # ser = serial.Serial('/dev/ttyACM0', 9600)   # debug line
 
@@ -63,8 +74,7 @@ while True:
             else:
                 print("Out of sync!")
 
-# Next step: decode the current information and transform to meters1674381261
-    #print("Cycle")    # debug
+# Next step: decode the current information and transform to meters
     packet = {}
     packet['from']  = addrFrom
     packet["data"]  = data
