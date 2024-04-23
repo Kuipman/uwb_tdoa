@@ -1,10 +1,10 @@
-# DW1000_HARE
+# UWB_TDoA3
 
-Library of basic functionalities for Decawave's DW1000 chips/modules with Arduino -- edited for use with HARE lab projects. (DW1000 - https://www.decawave.com/products/dwm1000-module)
+Project utilizing a Time Difference of Arrival (TDoA) system utilizing a receive-only mobile tag calculating its xyz coordinate using packet data sent from stationary base station modules.
 
-UWB Nodes used comprise the Loco Positioning System (see https://www.bitcraze.io/products/loco-positioning-node/)
+UWB Nodes used are from the Loco Positioning System (see https://www.bitcraze.io/products/loco-positioning-node/)
 
-Manual DW1000 source pulled from library by thotro (see https://github.com/thotro/arduino-dw1000).
+Manual DW1000 source pulled from library by thotro (see https://github.com/thotro/arduino-dw1000). Library contains basic functionalities for Decawave's DW1000 chips/modules with Arduino. (DW1000 - https://www.decawave.com/products/dwm1000-module)
 
 ## License
 
