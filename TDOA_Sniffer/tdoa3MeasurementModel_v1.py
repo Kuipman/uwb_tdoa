@@ -1,7 +1,7 @@
 """
 tdoa3MeasurementModel_v1.py
 
-Last Updated: 20240424
+Last Updated: 20240502
 
 v1 Script parses packets from an existing yaml file and generates localization approximates
 
@@ -22,33 +22,38 @@ import rclpy    # don't forget to source your ROS2 configuration, else this will
 from rclpy.node import Node
 
 
-#####   Global variables and Define values    #####
-file_path = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/output20240415.yaml"
-anchor1_pos = [0, 0, 0]
-anchor2_pos = [0, 4.5, 0]
-anchor3_pos = [4.5, 0, 0]
-anchor4_pos = [4.5, 4.5, 0]
-
-DEBUG = False        # set to True for printouts to console
+#####   Global Constants (TUNING VALUES)   #####
+FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/output20240415.yaml"
+ANCHOR1_POS = [0, 0, 0]
+ANCHOR2_POS = [0, 4.5, 0]
+ANCHOR3_POS = [4.5, 0, 0]
+ANCHOR4_POS = [4.5, 4.5, 0]
+TDOA_BOUND_LOW  = 0.5
+TDOA_BOUND_HIGH = 2
+M_TICK = 0.004691764
+SPEED_OF_LIGHT = 299792458.0
+DEBUG = False                  # set to True for debug printouts to console
 
 
 #####       Global Classes and Functions       #####
 # RemoteData object assists with tracking individual information for each anchor remote to given anchor
 class RemoteData:
     def __init__(self, id = 0):
-        self.id = id
+        self.id             = id
         self.distance_ticks = 0
-        self.tdoa = 0         # tdoa between anchor and remote anchor wrt tag
-        self.tdoaList = [0, 0, 0]
-        self.rxTimeStamp = 0
-        self.seq = 0
+        self.tdoa           = 0         # tdoa between anchor and remote anchor wrt tag
+        # self.tdoaList       = [0, 0, 0] # add this maybe later
+        self.rxTimeStamp    = 0
+        self.seq            = 0
 
 # Packet object contains necessary information from each packet for TDoA calculations.
 class Packet:
     def __init__(self):
-        self.remoteList = [RemoteData(), RemoteData(), RemoteData()]   # Three remote anchors from transmitting anchor
+        # up to three anchors remotely communicate with source anchor. For simplicity ids 1 - 4 are tracked in
+        # a list, but only three are used according to their id
+        self.remoteList  = [RemoteData(1), RemoteData(2), RemoteData(3), RemoteData(4)]
         self.remoteCount = 0
-        self.seq = 0
+        self.seq         = 0
         self.rxTimeStamp = 0     # wrt tag clock
         self.txTimeStamp = 0     # wrt transmitting anchor clock
     
@@ -60,41 +65,69 @@ class Anchor:
     def __init__(self, position = None, id = 0):
         if(position is None):
             position = [0, 0, 0]
-        self.position = position      # cartesian coordinates of anchor
-        self.id = id                  # id of anchor
-        self.prevPacket = Packet()    # previous packet received by tag from this anchor
+        self.position   = position      # cartesian coordinates of anchor
+        self.id         = id            # id of anchor
+        self.prevPacket = Packet()      # previous packet received by tag from this anchor
     
+    # replaces tracked packet with latest packet pulled from bitstream
     def update_packet(self, packet):
         self.prevPacket = packet
+    
+    # Updates the packet, skips updating the tdoa calculations in remote anchor info
+    def skinny_update_packet(self, packet):
+        self.prevPacket.remoteCount = packet.remoteCount
+        self.prevPacket.seq         = packet.seq
+        self.prevPacket.rxTimeStamp = packet.rxTimeStamp
+        self.prevPacket.txTimeStamp = packet.txTimeStamp
+        for remote in packet.remoteList:
+            if packet.id is not remote.id:
+                id = remote.id
+                self.prevPacket.remoteList[id - 1].distance_ticks = remote.distance_ticks
+                self.prevPacket.remoteList[id - 1].rxTimeStamp    = remote.rxTimeStamp
+                self.prevPacket.remoteList[id - 1].seq            = remote.seq
+
 
 # Set anchors (positions are static and unchanging)
-anchorList = [Anchor(anchor1_pos, 1), Anchor(anchor2_pos, 2), Anchor(anchor3_pos, 3), Anchor(anchor4_pos, 4)]
+anchorList = [Anchor(ANCHOR1_POS, 1), Anchor(ANCHOR2_POS, 2), Anchor(ANCHOR3_POS, 3), Anchor(ANCHOR4_POS, 4)]
 
-# Allows for reading an individual packet from the yaml file
+################################################################
+#####                 Global Functions                     #####
+################################################################
+
+# # Allows for reading an individual packet from the yaml file
 def read_packets(file_path):
     with open(file_path, 'r') as file:
         for data in yaml.safe_load_all(file):
             yield data
 
 # Non-Kalman filter for tdoa outliers
-def lazyTdoaEstimator(anchor_id, remote_id, tdoa):
-    tdoa_avg = tdoa
-    # Select the correct remoteData in accordance with remote_id
-    for remote in anchorList[anchor_id - 1].prevPacket.remoteList:
-        if remote.id is remote_id:
-            counter = 0
-            for td in remote.tdoaList:      # cycle through the tdoa values in tdoaList
-                if td != 0:
-                    tdoa_avg = (tdoa_avg + td) / 2
-                
-            break
+# Just filters out outliers and averages the tdoa values
+def tdoaLazyEstimator(anchor_id, remote_id, newTdoa):
+    if anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa == 0:     # initial tracked tdoa is 0
+        anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = newTdoa  # sets tracked tdoa to new packet value
+        return 0
+    prevTdoa = anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa
+    if (prevTdoa / newTdoa) < TDOA_BOUND_LOW or (prevTdoa / newTdoa) > TDOA_BOUND_HIGH:    # outside acceptable bounds
+        return 0
+    tdoa_avg = (prevTdoa + newTdoa) / 2
+    # anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = tdoa_avg
     return tdoa_avg
 
 
 # def tdoaKalmanEstimator():
 
+"""
+Hyperbolic Localization infrastructure using TDoA
 
-#####     Program Start     #####
+
+"""
+def localizer(newTdoa, anchor_id, remote_id):
+    return True
+
+
+################################################################
+#####                    Main Script                       #####
+################################################################
 """
 For each packet in the yaml file:
     - Parse data into a tempPacket object (math can be done directly without the object, but it helps visually)
@@ -103,21 +136,20 @@ For each packet in the yaml file:
         - If prior packet exists but a sequence number was skipped, save packet to anchor object and continue
         - If prior packet exists and sequence number matches up, calculate TDoA between the anchor object and respective remote anchors
 """
-for newPacket in read_packets(file_path):  
+for newPacket in read_packets(FILE_PATH):  
     # Create placeholder packet, fill with information from newPacket
     tempPacket             = Packet()   # Placeholder packet for easier transfer to anchor objects
-    tempPacket.id          = newPacket.get('from', 'N/A')     # where did this latest packet come from?
-    tempPacket.remoteCount = newPacket.get('remoteCount', 'N/A')
-    tempPacket.seq         = newPacket.get('seq', 'N/A')
-    tempPacket.rxTimeStamp = newPacket.get('ts', 'N/A')
-    tempPacket.txTimeStamp = newPacket.get('txTimeStamp', 'N/A')
-    counter = 0
-    for remote in newPacket['remoteAnchorData']:        # record each set of remote anchor information
-        tempPacket.remoteList[counter].distance_ticks = remote.get('distance', 'N/A')
-        tempPacket.remoteList[counter].id             = remote.get('id', 'N/A')
-        tempPacket.remoteList[counter].rxTimeStamp    = remote.get('rxTimeStamp', 'N/A')
-        tempPacket.remoteList[counter].seq            = remote.get('seq', 'N/A')
-        counter += 1
+    tempPacket.id          = newPacket.get('from',        'N/A')     # where did this latest packet come from?
+    tempPacket.remoteCount = newPacket.get('remoteCount', 'N/A')     # how many remote anchors tracked by sender
+    tempPacket.seq         = newPacket.get('seq',         'N/A')     # sequence number of this packet
+    tempPacket.rxTimeStamp = newPacket.get('ts',          'N/A')     # timestamp of receipt at tag
+    tempPacket.txTimeStamp = newPacket.get('txTimeStamp', 'N/A')     # timestamp of transmission from sender
+    # records and sequentially organizes remote anchors
+    for remote in newPacket['remoteAnchorData']:
+        id = remote.get('id', 'N/A')
+        tempPacket.remoteList[id - 1].distance_ticks = remote.get('distance', 'N/A')
+        tempPacket.remoteList[id - 1].rxTimeStamp    = remote.get('rxTimeStamp', 'N/A')
+        tempPacket.remoteList[id - 1].seq            = remote.get('seq', 'N/A')
     """
     With the placeholder packet built, now check if this packet is the next expected packet of
     the respective anchor. If not, skip TDoA calculations and just record the packet.
@@ -128,8 +160,8 @@ for newPacket in read_packets(file_path):
     if tempPacket.seq is not (anchorList[tempPacket.id - 1].prevPacket.seq + 1):   # checks seq of current packet in respective anchor
         if DEBUG:
             print("Unexpected sequence number, or empty anchor. Recording packet to anchor and reading next packet.")
-        anchorList[tempPacket.id - 1].update_packet(tempPacket)
-        continue    # skips all calculations and moves to next packet
+        anchorList[tempPacket.id - 1].skinny_update_packet(tempPacket)
+        continue    # skips all further calculations and moves to next packet
     
     """
     If this packet is the next expected packet for the respective anchor, update the TDoA calculations for this anchor and each remote anchor.
@@ -138,22 +170,21 @@ for newPacket in read_packets(file_path):
     that particular tdoa calculation is skipped (this includes anchors that haven't yet received a packet)
     """
     # First we calculate clock correction = ratio of differences in timestamps between current and previous packets from anchor
-    alpha = (tempPacket.rxTimeStamp - anchorList[tempPacket.id - 1].prevPacket.rxTimeStamp)/ \
-        (tempPacket.txTimeStamp - anchorList[tempPacket.id - 1].prevPacket.txTimeStamp)    # (P3_rx - P1_rx)/(P3_tx - P1_tx)
-    if alpha < 0.999 or alpha > 1.001:     # check for clock correction outliers. These are discarded
-        anchorList[tempPacket.id - 1].update_packet(tempPacket)
+    alpha = (tempPacket.rxTimeStamp - anchorList[tempPacket.id - 1].prevPacket.rxTimeStamp)\
+          / (tempPacket.txTimeStamp - anchorList[tempPacket.id - 1].prevPacket.txTimeStamp)    # (P3_rx - P1_rx)/(P3_tx - P1_tx)
+    if alpha < 0.999 or alpha > 1.001:     # check for clock correction outliers, these will screw up the tdoa
+        anchorList[tempPacket.id - 1].skinny_update_packet(tempPacket)   # adjust to update without changes to tdoa values
         continue
 
     for remote in tempPacket.remoteList:                                 # cycle through each remote anchor, calculate tdoa where able
         if remote.seq is not anchorList[remote.id - 1].prevPacket.seq:   # check that tempPacket is tracking the same sequence number from P2. Here, these need to be identical
             if DEBUG:
                 print(f"Sequence mismatch between P2 and P3. Skipping anchor {remote.id}")
-            continue                                                     # skips this anchor, moves on to next one
+            continue                    # skips this anchor, moves on to next one
         """
         Now, calculate TDoA
 
         d_rx = rxTimestamp of current packet - rxTimestamp of previous packet from same anchor
-
         d_tx = P3_tx - P2_tx. These are with respect to two different clocks, so the time of flight between the two anchors
         needs to be considered. This is given in the distance_ticks variable of the remote anchor. So,
         d_tx = P3_tx - (P2_rx - distance_ticks)
@@ -166,9 +197,8 @@ for newPacket in read_packets(file_path):
         if d_tx < 0:     # timer has wrapped
             d_tx = d_tx + 4294967296        # 32-bit unsigned integer max
         
-        tdoa_raw = np.abs(d_rx - (alpha * d_tx))    # The great tdoa calculation
-
-        
+        tdoa_raw = np.abs(d_rx - (alpha * d_tx))   # The great tdoa calculation
+     
         # Now, filter for outliers. For brevity, take ratio of previous tdoa with current tdoa. If > 1, discard tdoa
         # @todo better filtration -- issues with a fast-moving device are foreseen. Kalman filter will be useful
         """
@@ -177,29 +207,29 @@ for newPacket in read_packets(file_path):
             1) Lazy filter -- ratio calculation between raw tdoa and previously-recorded values
             2) Kalman filter (?)
         """
-        tdoa_estimated = lazyTdoaEstimator(tempPacket.id, remote.id, tdoa_raw)
+        tdoa_estimated = tdoaLazyEstimator(tempPacket.id, remote.id, tdoa_raw)
         # tdoa_estimated = tdoa_kalmanEstimator()
 
+        """
+        Here is where the localization code will go. For now, let's just use this to update the tdoa
+        """
+        # for debug, delete later vvv
+        previousTDOA = anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa
 
-        # Average the tdoa with its previous value (eventually, replace this with Kalman filtering)
+        test = localizer(previousTDOA, tdoa_estimated, ANCHOR1_POS)
 
-        # Record the TDoA to respective anchor's remote list
+        # after localization is done, replace old tdoa value with updated value
+        if tdoa_estimated != 0:   # a constant 0 will loop endlessly
+            anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa = tdoa_estimated
 
-        # if id is remote.id in anchorList[remote.id - 1].prevPacket.remoteList:
-        #     print("Present")
-
-
-
-        # print(f"Clock Correction: {alpha}")
-        # print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_real}")
+        """ Debug print out of tdoa distance measurements """
+        if((tempPacket.id == 2 and remote.id == 1) or (tempPacket.id == 1 and remote.id == 2)):
+            print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
+            print(f"TDoA Raw: {tdoa_raw}  | Previous TDoA: {previousTDOA}  | TDoA Estimated: {tdoa_estimated}")
         # if(tempPacket.id == 2 and remote.id == 1):
-        #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_real}")
-
-        """"""
-        M_Tick = 0.004691764
-        if(tempPacket.id == 3 and remote.id == 1):
-            print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_Tick}")
-        
+        #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_Tick} m")
+        # if(tempPacket.id == 1 and remote.id == 2):
+        #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_Tick} m")
         
 
 
