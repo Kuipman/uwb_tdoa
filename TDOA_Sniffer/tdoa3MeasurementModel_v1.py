@@ -37,25 +37,40 @@ TDOA_BOUND_LOW  = 0.5
 TDOA_BOUND_HIGH = 2
 M_TICK = 0.004691764
 SPEED_OF_LIGHT = 299792458.0
-DEBUG = False                  # set to True for debug printouts to console
+DEBUG = True                  # set to True for debug printouts to console
 
 #####       Global Classes and Functions       #####
 class MovingWindow:
     def __init__(self, window_size):
         self.window = deque(maxlen=window_size)
         self.window_size = window_size
+        self.weighted_average = None  # Initialize weighted average
 
     def add_value(self, value):
         self.window.append(value)
+        self.update_weighted_average(value)  # Update weighted average
 
     def get_average(self):
         return np.mean(self.window) if len(self.window) > 0 else float('nan')
 
     def get_median(self):
-        return np.median(self.window) if len(self.window) > 0 else float('nan')
+        if len(self.window) > 0:
+            return np.median(self.window)
+        else:
+            return float('nan')
 
     def get_values(self):
         return list(self.window)
+
+    def update_weighted_average(self, new_value, alpha=0.2):
+        # Update the weighted average with the new value
+        if self.weighted_average is None:
+            self.weighted_average = new_value
+        else:
+            self.weighted_average = (1 - alpha) * self.weighted_average + alpha * new_value
+
+    def get_weighted_average(self):
+        return self.weighted_average if self.weighted_average is not None else float('nan')
     
 # RemoteData object assists with tracking individual information for each anchor remote to given anchor
 class RemoteData:
@@ -110,7 +125,7 @@ class TDOA:
     def __init__(self, anchor1, anchor2):
         self.anchor1  = anchor1
         self.anchor2  = anchor2
-        self.window   = MovingWindow(WINDOW_SIZE)
+        self.mWindow   = MovingWindow(WINDOW_SIZE)
         self.estimate = 0
 
 
@@ -151,40 +166,56 @@ def tdoaLazyEstimator(anchor_id, remote_id, newTdoa):
 updateTdoaValues(anchor_Id, remote_id, newTdoa)
 
 Purpose: Adds calculated raw tdoa value to the respective moving window (filtering for outliers) Calculate the median of the window as the new tdoa estimate
+
+@todo A fast-moving tag can break this system since new values outside the percentile won't be read. How to fix?
 """
+
 def updateTdoaValues(anchor_id, remote_id, newTdoa):
+    if remote_id == anchor_id:  # id outlier filtering
+        return None
     if remote_id < anchor_id:  # Flip these if needed
         tmp = anchor_id
         anchor_id = remote_id
         remote_id = tmp
+
     # iterate through list until correct TDOA object found
     counter = 0
     for element in tdoa_roster:
-        if element.anchor1 == anchor_id:
-            if element.anchor2 == remote_id:
-                break
+        if element.anchor1 == anchor_id and element.anchor2 == remote_id:
+            break
         counter += 1
+    else:
+        print("No matching TDOA object found.")
+        return
+
     # set temporary value as pointer to the moving window
-    window = tdoa_roster[counter].window
-    
+    window = tdoa_roster[counter].mWindow
+
     # Calculate IQR for outlier detection
     window_values = window.get_values()
-    if len(window_values) > 1:
-        q1 = np.percentile(window_values, 15)
-        q3 = np.percentile(window_values, 85)
-        iqr = q3 - q1
-        lower_bound = q1 - 1.5 * iqr
-        upper_bound = q3 + 1.5 * iqr
-        
+    # The dumb way
+    if len(window_values) == 5:
+        avg = window.get_weighted_average()
+        lower_bound = avg - (0.5 * avg)
+        upper_bound = avg * 2
+    # The smart way that doesn't work
+    # if len(window_values) == 5:
+    #     q1 = np.percentile(window_values, 25)
+    #     q3 = np.percentile(window_values, 75)
+    #     iqr = q3 - q1
+    #     lower_bound = q1 - 1.5 * iqr
+    #     upper_bound = q3 + 1.5 * iqr
+
         if newTdoa < lower_bound or newTdoa > upper_bound:
             print(f"Outlier detected: {newTdoa} is outside the range [{lower_bound}, {upper_bound}]")
             return  # Do not add the outlier value to the window
-        
-    # add new tdoa data to moving window
-    # @TODO median calculation is not working!
-    tdoa_roster[counter].window.add_value(newTdoa)
-    if len(window_values) > 1:
-        tdoa_roster[counter].estimate = tdoa_roster[counter].window.get_median
+
+    # Add new TDoA data to moving window and update weighted average
+    window.add_value(newTdoa)
+
+    if len(window_values) == 5:
+        tdoa_roster[counter].estimate = window.get_median()
+        return tdoa_roster[counter].estimate
     
 
 """
@@ -193,6 +224,8 @@ Hyperbolic Localization infrastructure using TDoA
 The 
 """
 def localizer(estimatedLocation, tdoa_12, tdoa_13, tdoa_14, tdoa_23, tdoa_24, tdoa_34):
+    print(f"Localizer reached. TDoA values: 12 = {tdoa_12}, 13 = {tdoa_13}, 14 = {tdoa_14}")
+    print(f"                                23 = {tdoa_23}, 24 = {tdoa_24}, 34 = {tdoa_34}")
     return True
 
 
@@ -278,24 +311,33 @@ for newPacket in read_packets(FILE_PATH):
         
         updateTdoaValues() function cross-checks with previously-tracked tdoa values and decides whether or not to update
         """
-        updateTdoaValues(tempPacket.id, remote.id, tdoa_raw)
-
-    
-        # Now, filter for outliers.
-
-        # tdoa_estimated = tdoaLazyEstimator(tempPacket.id, remote.id, tdoa_raw)
-        tdoa_estimated = tdoa_raw
+        tdoa_estimated = updateTdoaValues(tempPacket.id, remote.id, tdoa_raw)
 
         """
-        Here is where the localization code will go. For now, let's just use this to update the tdoa
+        Debug printout: TDoA values
         """
-        previousTDOA = anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa
-        print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters") # Prints tdoa measurement -- debug
-
+        if DEBUG:
+            if tdoa_estimated is None:
+                print(f"TDoA Raw:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_TICK} meters")
+            else:
+                print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
+        # previousTDOA = anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa
         # if((tempPacket.id == 2 and remote.id == 1) or (tempPacket.id == 1 and remote.id == 2)):
         #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
             # print(f"TDoA Raw: {tdoa_raw}  | Previous TDoA: {previousTDOA}  | TDoA Estimated: {tdoa_estimated}")
-        
+
+    """
+    Once all remote anchors have been cycled through and TDoAs calculated, check if the first MINIMUM_ITERATIONS
+    number of packets has been processed (this allows for all needed data to be populated and condensed for localization).
+    If MINIMUM_ITERATIONS has not yet been reached, increment the counter and carry on.
+    If MINIMUM_ITERATIONS has been reached, run the localizer to update the estimated location
+    """
+
+    if initializationCounter < MINIMUM_ITERATIONS:
+        initializationCounter += 1
+    else:
+        localizer(estimatedLocation, tdoa_roster[0].estimate, tdoa_roster[1].estimate, tdoa_roster[2].estimate, 
+                                     tdoa_roster[3].estimate, tdoa_roster[4].estimate, tdoa_roster[5].estimate)
 
 
 
@@ -305,6 +347,42 @@ for newPacket in read_packets(FILE_PATH):
     Spare code below, ignore for now
     """
 
+# def updateTdoaValues(anchor_id, remote_id, newTdoa):
+#     if remote_id == anchor_id: # id outlier filtering
+#         return None
+#     if remote_id < anchor_id:  # Flip these if needed
+#         tmp = anchor_id
+#         anchor_id = remote_id
+#         remote_id = tmp
+#     # iterate through list until correct TDOA object found
+#     counter = 0
+#     for element in tdoa_roster:
+#         if element.anchor1 == anchor_id:
+#             if element.anchor2 == remote_id:
+#                 break
+#         counter += 1
+#     # set temporary value as pointer to the moving window
+#     window = tdoa_roster[counter].mWindow
+    
+#     # Calculate IQR for outlier detection
+#     window_values = window.get_values()
+#     if len(window_values) == 5:
+#         q1 = np.percentile(window_values, 25)
+#         q3 = np.percentile(window_values, 75)
+#         iqr = q3 - q1
+#         lower_bound = q1 - 1.5 * iqr
+#         upper_bound = q3 + 1.5 * iqr
+        
+#         if newTdoa < lower_bound or newTdoa > upper_bound:
+#             print(f"Outlier detected: {newTdoa} is outside the range [{lower_bound}, {upper_bound}]")
+#             return  # Do not add the outlier value to the window
+        
+#     # add new tdoa data to moving window
+#     tdoa_roster[counter].mWindow.add_value(newTdoa)
+#     if len(window_values) == 5:
+#         tdoa_roster[counter].estimate = tdoa_roster[counter].mWindow.get_median()
+
+#######################
 
     # for packet in yaml.load_all(sys.stdin, Loader=yaml.Loader):
     # if not packet:
