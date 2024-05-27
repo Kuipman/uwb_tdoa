@@ -168,6 +168,8 @@ updateTdoaValues(anchor_Id, remote_id, newTdoa)
 Purpose: Adds calculated raw tdoa value to the respective moving window (filtering for outliers) Calculate the median of the window as the new tdoa estimate
 
 @todo A fast-moving tag can break this system since new values outside the percentile won't be read. How to fix?
+
+Note: A positive TDoA indicates the tag is closer to the latter base station (i.e. tdoa_12 = 1.02, closer to base station 2)
 """
 
 def updateTdoaValues(anchor_id, remote_id, newTdoa):
@@ -177,6 +179,7 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
         tmp = anchor_id
         anchor_id = remote_id
         remote_id = tmp
+        newTdoa *= -1       # if ids are flipped, tdoa value also needs to be flipped
 
     # iterate through list until correct TDOA object found
     counter = 0
@@ -193,11 +196,15 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
 
     # Calculate IQR for outlier detection
     window_values = window.get_values()
-    # The dumb way
+    # The dumb way that works
     if len(window_values) == 5:
         avg = window.get_weighted_average()
-        lower_bound = avg - (0.5 * avg)
-        upper_bound = avg * 2
+        if newTdoa > 0:
+            lower_bound = avg - (0.5 * avg)
+            upper_bound = avg * 2
+        else:
+            lower_bound = avg * 2
+            upper_bound = avg - (0.5 * avg)
     # The smart way that doesn't work
     # if len(window_values) == 5:
     #     q1 = np.percentile(window_values, 25)
@@ -221,11 +228,20 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
 """
 Hyperbolic Localization infrastructure using TDoA
 
-The 
+The estimated tdoa value for each base station pair and the previously-estimated location are
+parameters for this function.
+
+This function states a series of six hyperboloids based on the base station pairs, then estimates
+their intersection at which the tag is most likely to be positioned.
+
+Returns the new location estimate
 """
 def localizer(estimatedLocation, tdoa_12, tdoa_13, tdoa_14, tdoa_23, tdoa_24, tdoa_34):
-    print(f"Localizer reached. TDoA values: 12 = {tdoa_12}, 13 = {tdoa_13}, 14 = {tdoa_14}")
-    print(f"                                23 = {tdoa_23}, 24 = {tdoa_24}, 34 = {tdoa_34}")
+    # print(f"Localizer reached. TDoA values: 12 = {tdoa_12}, 13 = {tdoa_13}, 14 = {tdoa_14}")
+    # print(f"                                23 = {tdoa_23}, 24 = {tdoa_24}, 34 = {tdoa_34}")
+
+
+
     return True
 
 
@@ -265,8 +281,8 @@ for newPacket in read_packets(FILE_PATH):
     as there are anchors
     """
     if (tempPacket.seq is not (anchorList[tempPacket.id - 1].prevPacket.seq + 1) or (tempPacket.seq == 0 and (anchorList[tempPacket.id - 1].prevPacket.seq + 1) != 127)):   # checks seq of current packet in respective anchor
-        if DEBUG:
-            print("Unexpected sequence number, or empty anchor. Recording packet to anchor and reading next packet.")
+        # if DEBUG:
+        #     print("Unexpected sequence number, or empty anchor. Recording packet to anchor and reading next packet.")
         anchorList[tempPacket.id - 1].skinny_update_packet(tempPacket)
         continue    # skips all further calculations and moves to next packet
     
@@ -285,8 +301,8 @@ for newPacket in read_packets(FILE_PATH):
 
     for remote in tempPacket.remoteList:                                 # cycle through each remote anchor, calculate tdoa where able
         if remote.seq is not anchorList[remote.id - 1].prevPacket.seq:   # check that tempPacket is tracking the same sequence number from P2. Here, these need to be identical
-            if DEBUG:
-                print(f"Sequence mismatch between P2 and P3. Skipping anchor {remote.id}")
+            # if DEBUG:
+            #     print(f"Sequence mismatch between P2 and P3. Skipping anchor {remote.id}")
             continue                    # skips this anchor, moves on to next one
         """
         Now, calculate TDoA
@@ -304,8 +320,7 @@ for newPacket in read_packets(FILE_PATH):
         if d_tx < 0:     # timer has wrapped
             d_tx = d_tx + 4294967296        # 32-bit unsigned integer max
         
-        tdoa_raw = np.abs(d_rx - (alpha * d_tx))   # The great tdoa calculation
-
+        tdoa_raw = d_rx - (alpha * d_tx)   # The great tdoa calculation
         """
         We need to ensure this new tdoa value isn't an outlier (i.e. it's actually useful)
         
@@ -320,7 +335,10 @@ for newPacket in read_packets(FILE_PATH):
             if tdoa_estimated is None:
                 print(f"TDoA Raw:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_TICK} meters")
             else:
-                print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
+                if ((tdoa_estimated < 0) and (tdoa_raw > 0)) or ((tdoa_estimated > 0) and (tdoa_raw < 0)):
+                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {-tdoa_estimated * M_TICK} meters")
+                else:
+                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
         # previousTDOA = anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa
         # if((tempPacket.id == 2 and remote.id == 1) or (tempPacket.id == 1 and remote.id == 2)):
         #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
@@ -332,7 +350,6 @@ for newPacket in read_packets(FILE_PATH):
     If MINIMUM_ITERATIONS has not yet been reached, increment the counter and carry on.
     If MINIMUM_ITERATIONS has been reached, run the localizer to update the estimated location
     """
-
     if initializationCounter < MINIMUM_ITERATIONS:
         initializationCounter += 1
     else:
