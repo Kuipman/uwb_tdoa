@@ -14,6 +14,7 @@ import sys
 import struct
 import serial
 import yaml
+from datetime import datetime
 import time
 # ROS2
 import rclpy    # don't forget to source your ROS2 configuration, else this will return an error
@@ -141,7 +142,10 @@ while True:
                 packet['tof'][remote_id] = tof
             if unit == 'meters':
                 packet['tof'][remote_id] = tof * M_PER_TICK - ANTENNA_OFFSET
-
+    
+    # Append the current system time to the packet
+    current_time = datetime.now().isoformat()
+    packet['currentTime'] = current_time
     print("---")
     print(yaml.dump(packet, Dumper=yaml.Dumper))
 

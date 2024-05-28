@@ -1,7 +1,7 @@
 """
 tdoa3MeasurementModel_v1.py
 
-Last Updated: 20240502
+Last Updated: 20240527
 
 v1 Script parses packets from an existing yaml file and generates localization approximates
 
@@ -17,29 +17,48 @@ import serial
 import yaml
 import time
 import numpy as np
-import pymap3d as pm
+# import pymap3d as pm
 from collections import deque     # for moving window
+from scipy.optimize import least_squares   # optimization
+import matplotlib.pyplot as plt            # plotting (optional)
+from mpl_toolkits.mplot3d import Axes3D    # more plotting
 # For ROS2:
-import rclpy    # don't forget to source your ROS2 configuration, else this will return an error
-from rclpy.node import Node
-
+# import rclpy    # don't forget to source your ROS2 configuration, else this will return an error
+# from rclpy.node import Node
 
 #####   Global Constants (TUNING VALUES)   #####
-FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/output20240415.yaml"
-ANCHOR1_POS = [0, 0, 0]
-ANCHOR2_POS = [0, 4.5, 0]
-ANCHOR3_POS = [4.5, 0, 0]
-ANCHOR4_POS = [4.5, 4.5, 0]
+# FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/output20240415.yaml"
+FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/finalTest_randomWalk.yaml"
 INITIAL_GUESS = [2, 3, 0]
-WINDOW_SIZE = 5
-MINIMUM_ITERATIONS = 50           # number of complete cycles before localization starts
+BASE_STATION_POS = np.array([
+    [0, 0, 0.9144],
+    [0, 4.5, 0.9144],
+    [4.5, 0, 1.2192],
+    [4.5, 4.5, 1.524]
+])
+MOVING_WINDOW_SIZE = 10
+MINIMUM_PACKET_ITERATIONS = 50   # number of complete cycles before localization starts
+MINIMUM_LOCALE_ITERATIONS = 10   # after localization starts, minimum number of complete cycles between each localization function call
 TDOA_BOUND_LOW  = 0.5
 TDOA_BOUND_HIGH = 2
+DEBUG = False                  # set to True for debug printouts to console
+
+#####   Static Global Constants (Do not tune)   #####
 M_TICK = 0.004691764
 SPEED_OF_LIGHT = 299792458.0
-DEBUG = True                  # set to True for debug printouts to console
 
-#####       Global Classes and Functions       #####
+
+################################################################
+#####                 Global Classes                       #####
+################################################################
+"""
+MovingWindow -- Acts as an array of preset size. Once array is full of
+objects and a new object is received, the old object is removed and the new
+object is added (think of a visual window moving to the right).
+
+Also includes functions for calculating the average and median of the
+tracked values. Used to track the latest TDoA values for each base station pair
+"""
 class MovingWindow:
     def __init__(self, window_size):
         self.window = deque(maxlen=window_size)
@@ -72,7 +91,11 @@ class MovingWindow:
     def get_weighted_average(self):
         return self.weighted_average if self.weighted_average is not None else float('nan')
     
-# RemoteData object assists with tracking individual information for each anchor remote to given anchor
+"""
+Tracks remote anchor information received as part of an incoming packet
+
+Used as part of the Packet object
+"""
 class RemoteData:
     def __init__(self, id = 0):
         self.id             = id
@@ -81,7 +104,9 @@ class RemoteData:
         self.rxTimeStamp    = 0
         self.seq            = 0
 
-# Packet object contains necessary information from each packet for TDoA calculations.
+"""
+Tracks all information from an incoming packet, including remote anchor information
+"""
 class Packet:
     def __init__(self):
         # up to three anchors remotely communicate with source anchor. For simplicity ids 1 - 4 are tracked in
@@ -95,7 +120,11 @@ class Packet:
     def updateRemoteData(self, remoteID, remote_data):
         self.remoteList[remoteID] = remote_data
 
-# Anchor object tracks static information of the anchor (id, coordinates) and the previously received packet from that anchor.
+"""
+Anchor object tracks static information of the given anchor (id, coordinates), as
+well as the previously-received packet from that anchor
+"""
+
 class Anchor:
     def __init__(self, position = None, id = 0):
         if(position is None):
@@ -121,17 +150,24 @@ class Anchor:
                 self.prevPacket.remoteList[id - 1].rxTimeStamp    = remote.rxTimeStamp
                 self.prevPacket.remoteList[id - 1].seq            = remote.seq
 
+"""
+Tracks a given anchor pair's MovingWindow of TDoA values, and keeps track of the
+latest TDoA estimate based on the values in the window
+"""
 class TDOA:
     def __init__(self, anchor1, anchor2):
         self.anchor1  = anchor1
         self.anchor2  = anchor2
-        self.mWindow   = MovingWindow(WINDOW_SIZE)
+        self.mWindow   = MovingWindow(MOVING_WINDOW_SIZE)
         self.estimate = 0
 
 
-# Set anchors (positions are static and unchanging)
-anchorList = [Anchor(ANCHOR1_POS, 1), Anchor(ANCHOR2_POS, 2), Anchor(ANCHOR3_POS, 3), Anchor(ANCHOR4_POS, 4)]
-estimatedLocation = INITIAL_GUESS     # estimated xyz coordinate of tag
+################################################################
+#####                 Global Variables                     #####
+################################################################
+
+anchorList = [Anchor(BASE_STATION_POS[0], 1), Anchor(BASE_STATION_POS[1], 2), Anchor(BASE_STATION_POS[2], 3), Anchor(BASE_STATION_POS[3], 4)]
+estimatedPosition = INITIAL_GUESS     # estimated xyz coordinate of tag
 tdoa_roster = [TDOA(1, 2), TDOA(1, 3), TDOA(1, 4), TDOA(2, 3), TDOA(2, 4), TDOA(3, 4)]  # tdoa_12, tdoa_13, tdoa_14, tdoa_23, tdoa_24, tdoa_34
 
 ################################################################
@@ -144,24 +180,6 @@ def read_packets(file_path):
         for data in yaml.safe_load_all(file):
             yield data
 
-# Non-Kalman filter for tdoa outliers
-# Just filters out outliers and averages the tdoa values
-def tdoaLazyEstimator(anchor_id, remote_id, newTdoa):
-    if anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa == 0:     # initial tracked tdoa is 0
-        anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = newTdoa  # sets tracked tdoa to new packet value
-        return 0
-    prevTdoa = anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa
-    if (prevTdoa / newTdoa) < TDOA_BOUND_LOW or (prevTdoa / newTdoa) > TDOA_BOUND_HIGH:    # outside acceptable bounds
-        return 0
-    tdoa_avg = (prevTdoa + newTdoa) / 2
-    # anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = tdoa_avg
-    return tdoa_avg
-
-
-# def tdoaBetterEstimator():
-
-# from latest packet, updates the tdoa value for the current anchor and its remote, as well as the remote anchor's tracked value with the current anchor
-# ex. packet from 3 gives tdoa_31 --> update same value in anchor 1 for tdoa_13
 """
 updateTdoaValues(anchor_Id, remote_id, newTdoa)
 
@@ -197,7 +215,7 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
     # Calculate IQR for outlier detection
     window_values = window.get_values()
     # The dumb way that works
-    if len(window_values) == 5:
+    if len(window_values) == MOVING_WINDOW_SIZE:
         avg = window.get_weighted_average()
         if newTdoa > 0:
             lower_bound = avg - (0.5 * avg)
@@ -214,13 +232,54 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
     #     upper_bound = q3 + 1.5 * iqr
 
         if newTdoa < lower_bound or newTdoa > upper_bound:
-            print(f"Outlier detected: {newTdoa} is outside the range [{lower_bound}, {upper_bound}]")
+            if DEBUG:
+                print(f"Outlier detected: {newTdoa} is outside the range [{lower_bound}, {upper_bound}]")
             return  # Do not add the outlier value to the window
 
     # Add new TDoA data to moving window and update weighted average
     window.add_value(newTdoa)
 
-    if len(window_values) == 5:
+    if len(window_values) == MOVING_WINDOW_SIZE:
+        tdoa_roster[counter].estimate = window.get_median()
+        return tdoa_roster[counter].estimate
+    
+
+"""
+Going pure averaging to try something here
+"""
+def updateTdoaValues_TEMP(anchor_id, remote_id, newTdoa):
+    if remote_id == anchor_id:  # id outlier filtering
+        return None
+    if remote_id < anchor_id:  # Flip these if needed
+        tmp = anchor_id
+        anchor_id = remote_id
+        remote_id = tmp
+        newTdoa *= -1       # if ids are flipped, tdoa value also needs to be flipped
+
+    # iterate through list until correct TDOA object found
+    counter = 0
+    for element in tdoa_roster:
+        if element.anchor1 == anchor_id and element.anchor2 == remote_id:
+            break
+        counter += 1
+    else:
+        print("No matching TDOA object found.")
+        return
+
+    # set temporary value as pointer to the moving window
+    window = tdoa_roster[counter].mWindow
+
+    # Calculate IQR for outlier detection
+    window_values = window.get_values()
+
+    # Get weighted average and add to the window
+    if len(window_values) == MOVING_WINDOW_SIZE:
+        avg = window.get_weighted_average()
+
+    # Add new TDoA data to moving window and update weighted average
+    window.add_value(newTdoa)
+
+    if len(window_values) == MOVING_WINDOW_SIZE:
         tdoa_roster[counter].estimate = window.get_median()
         return tdoa_roster[counter].estimate
     
@@ -236,13 +295,35 @@ their intersection at which the tag is most likely to be positioned.
 
 Returns the new location estimate
 """
-def localizer(estimatedLocation, tdoa_12, tdoa_13, tdoa_14, tdoa_23, tdoa_24, tdoa_34):
+def localizer(estimatedPosition, tdoa_12, tdoa_13, tdoa_14, tdoa_23, tdoa_24, tdoa_34):
     # print(f"Localizer reached. TDoA values: 12 = {tdoa_12}, 13 = {tdoa_13}, 14 = {tdoa_14}")
     # print(f"                                23 = {tdoa_23}, 24 = {tdoa_24}, 34 = {tdoa_34}")
+    
+    """
+    Objective function is needed for least-squares optimization
 
+    Calculates euclidean distance between last estimated position and base station positions. Subtracts
+    the calculated tdoa value to determine how close new value is to estimated position
+    """
+    def objective_function(position):
+        differences = []
 
+        for tdoa in tdoa_roster:
+            i = tdoa.anchor1 - 1  # Adjust for 0-based indexing
+            j = tdoa.anchor2 - 1  # Adjust for 0-based indexing
+            estimate = tdoa.estimate
+            dist_i = np.linalg.norm(position - BASE_STATION_POS[i])
+            dist_j = np.linalg.norm(position - BASE_STATION_POS[j])
+            differences.append((dist_i - dist_j) - estimate)
+    
+        return differences
+    
+    # Least squares calculation
+    result = least_squares(objective_function, estimatedPosition)
 
-    return True
+    optimized_position = result.x
+    print("Optimized Position:", optimized_position)
+    return optimized_position
 
 
 ################################################################
@@ -258,6 +339,7 @@ For each packet in the yaml file:
 """
 
 initializationCounter = 0   # iterates with each complete cycle until MINIMUM_ITERATIONS is reached
+localeCounter         = 0
 
 for newPacket in read_packets(FILE_PATH):  
     # Create placeholder packet, fill with information from newPacket
@@ -326,7 +408,8 @@ for newPacket in read_packets(FILE_PATH):
         
         updateTdoaValues() function cross-checks with previously-tracked tdoa values and decides whether or not to update
         """
-        tdoa_estimated = updateTdoaValues(tempPacket.id, remote.id, tdoa_raw)
+        # tdoa_estimated = updateTdoaValues(tempPacket.id, remote.id, tdoa_raw * M_TICK)
+        tdoa_estimated = updateTdoaValues_TEMP(tempPacket.id, remote.id, tdoa_raw * M_TICK)
 
         """
         Debug printout: TDoA values
@@ -336,9 +419,9 @@ for newPacket in read_packets(FILE_PATH):
                 print(f"TDoA Raw:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_TICK} meters")
             else:
                 if ((tdoa_estimated < 0) and (tdoa_raw > 0)) or ((tdoa_estimated > 0) and (tdoa_raw < 0)):
-                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {-tdoa_estimated * M_TICK} meters")
+                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {-tdoa_estimated} meters")
                 else:
-                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
+                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated} meters")
         # previousTDOA = anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa
         # if((tempPacket.id == 2 and remote.id == 1) or (tempPacket.id == 1 and remote.id == 2)):
         #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
@@ -350,10 +433,13 @@ for newPacket in read_packets(FILE_PATH):
     If MINIMUM_ITERATIONS has not yet been reached, increment the counter and carry on.
     If MINIMUM_ITERATIONS has been reached, run the localizer to update the estimated location
     """
-    if initializationCounter < MINIMUM_ITERATIONS:
+    if initializationCounter < MINIMUM_PACKET_ITERATIONS:
         initializationCounter += 1
     else:
-        localizer(estimatedLocation, tdoa_roster[0].estimate, tdoa_roster[1].estimate, tdoa_roster[2].estimate, 
+        localeCounter += 1
+        if localeCounter > MINIMUM_LOCALE_ITERATIONS:
+            localeCounter = 0
+            localizer(estimatedPosition, tdoa_roster[0].estimate, tdoa_roster[1].estimate, tdoa_roster[2].estimate, 
                                      tdoa_roster[3].estimate, tdoa_roster[4].estimate, tdoa_roster[5].estimate)
 
 
@@ -440,4 +526,17 @@ for packet in yaml.load_all(sys.stdin, Loader=yaml.Loader):
 
     data = {'id': packet['from'], 'tof': {}}
 """
+
+# Non-Kalman filter for tdoa outliers
+# # Just filters out outliers and averages the tdoa values
+# def tdoaLazyEstimator(anchor_id, remote_id, newTdoa):
+#     if anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa == 0:     # initial tracked tdoa is 0
+#         anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = newTdoa  # sets tracked tdoa to new packet value
+#         return 0
+#     prevTdoa = anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa
+#     if (prevTdoa / newTdoa) < TDOA_BOUND_LOW or (prevTdoa / newTdoa) > TDOA_BOUND_HIGH:    # outside acceptable bounds
+#         return 0
+#     tdoa_avg = (prevTdoa + newTdoa) / 2
+#     # anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = tdoa_avg
+#     return tdoa_avg
 
