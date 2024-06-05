@@ -1,7 +1,7 @@
 """
 tdoa3MeasurementModel_v1.py
 
-Last Updated: 20240527
+Last Updated: 20240604
 
 v1 Script parses packets from an existing yaml file and generates localization approximates
 
@@ -17,6 +17,7 @@ import serial
 import yaml
 import time
 import numpy as np
+import math
 # import pymap3d as pm
 from collections import deque     # for moving window
 from scipy.optimize import least_squares   # optimization
@@ -28,8 +29,8 @@ from mpl_toolkits.mplot3d import Axes3D    # more plotting
 
 #####   Global Constants (TUNING VALUES)   #####
 # FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/output20240415.yaml"
-FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/finalTest_randomWalk.yaml"
-INITIAL_GUESS = [2, 3, 0]
+FILE_PATH = "/home/nick_k/Documents/UWB/uwb_tdoa/TDOA_Sniffer/finalTest_static.yaml"
+INITIAL_GUESS = [2, 3, 2]
 BASE_STATION_POS = np.array([
     [0, 0, 0.9144],
     [0, 4.5, 0.9144],
@@ -41,12 +42,11 @@ MINIMUM_PACKET_ITERATIONS = 50   # number of complete cycles before localization
 MINIMUM_LOCALE_ITERATIONS = 10   # after localization starts, minimum number of complete cycles between each localization function call
 TDOA_BOUND_LOW  = 0.5
 TDOA_BOUND_HIGH = 2
-DEBUG = False                  # set to True for debug printouts to console
+DEBUG = True                  # set to True for debug printouts to console
 
 #####   Static Global Constants (Do not tune)   #####
 M_TICK = 0.004691764
 SPEED_OF_LIGHT = 299792458.0
-
 
 ################################################################
 #####                 Global Classes                       #####
@@ -93,8 +93,7 @@ class MovingWindow:
     
 """
 Tracks remote anchor information received as part of an incoming packet
-
-Used as part of the Packet object
+    - Used as part of the Packet object
 """
 class RemoteData:
     def __init__(self, id = 0):
@@ -160,6 +159,29 @@ class TDOA:
         self.anchor2  = anchor2
         self.mWindow   = MovingWindow(MOVING_WINDOW_SIZE)
         self.estimate = 0
+        self.mean     = 0     # for ending graphs/comparisons
+        self.std      = 0     # for ending graphs
+        self.count    = 0     # iterative
+
+    def addNewValue(self, newValue):
+        self.count += 1
+        
+        # calculate new mean
+        delta = newValue - self.mean
+        self.mean += delta / self.count
+
+        # calculate new sum of squared differences
+        sum_squared_diff += delta * (newValue - self.mean)
+
+        return self.mean, self.get_std(sum_squared_diff)
+    
+    def get_variance(self, sum_squared_diff):
+        if self.count < 2:
+            return float('nan')   # Need more data to compute variance
+        return self.sum_squared_diff / (self.count - 1)
+    
+    def get_std(self, sum_squared_diff):
+        return math.sqrt(self.get_variance(sum_squared_diff))
 
 
 ################################################################
@@ -182,11 +204,7 @@ def read_packets(file_path):
 
 """
 updateTdoaValues(anchor_Id, remote_id, newTdoa)
-
 Purpose: Adds calculated raw tdoa value to the respective moving window (filtering for outliers) Calculate the median of the window as the new tdoa estimate
-
-@todo A fast-moving tag can break this system since new values outside the percentile won't be read. How to fix?
-
 Note: A positive TDoA indicates the tag is closer to the latter base station (i.e. tdoa_12 = 1.02, closer to base station 2)
 """
 
@@ -215,21 +233,20 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
     # Calculate IQR for outlier detection
     window_values = window.get_values()
     # The dumb way that works
-    if len(window_values) == MOVING_WINDOW_SIZE:
-        avg = window.get_weighted_average()
-        if newTdoa > 0:
-            lower_bound = avg - (0.5 * avg)
-            upper_bound = avg * 2
-        else:
-            lower_bound = avg * 2
-            upper_bound = avg - (0.5 * avg)
-    # The smart way that doesn't work
-    # if len(window_values) == 5:
-    #     q1 = np.percentile(window_values, 25)
-    #     q3 = np.percentile(window_values, 75)
-    #     iqr = q3 - q1
-    #     lower_bound = q1 - 1.5 * iqr
-    #     upper_bound = q3 + 1.5 * iqr
+    # if len(window_values) == MOVING_WINDOW_SIZE:
+    #     avg = window.get_weighted_average()
+    #     if newTdoa > 0:
+    #         lower_bound = avg - (0.5 * avg)
+    #         upper_bound = avg * 2
+    #     else:
+    #         lower_bound = avg * 2
+    #         upper_bound = avg - (0.5 * avg)
+    if len(window_values) == 5:
+        q1 = np.percentile(window_values, 5)
+        q3 = np.percentile(window_values, 95)
+        iqr = q3 - q1
+        lower_bound = q1 - 1.5 * iqr
+        upper_bound = q3 + 1.5 * iqr
 
         if newTdoa < lower_bound or newTdoa > upper_bound:
             if DEBUG:
@@ -239,45 +256,9 @@ def updateTdoaValues(anchor_id, remote_id, newTdoa):
     # Add new TDoA data to moving window and update weighted average
     window.add_value(newTdoa)
 
-    if len(window_values) == MOVING_WINDOW_SIZE:
-        tdoa_roster[counter].estimate = window.get_median()
-        return tdoa_roster[counter].estimate
-    
+    # update mean and other values in TDOA object
+    tdoa_obj = tdoa_roster[counter].addNewValue(newTdoa)
 
-"""
-Going pure averaging to try something here
-"""
-def updateTdoaValues_TEMP(anchor_id, remote_id, newTdoa):
-    if remote_id == anchor_id:  # id outlier filtering
-        return None
-    if remote_id < anchor_id:  # Flip these if needed
-        tmp = anchor_id
-        anchor_id = remote_id
-        remote_id = tmp
-        newTdoa *= -1       # if ids are flipped, tdoa value also needs to be flipped
-
-    # iterate through list until correct TDOA object found
-    counter = 0
-    for element in tdoa_roster:
-        if element.anchor1 == anchor_id and element.anchor2 == remote_id:
-            break
-        counter += 1
-    else:
-        print("No matching TDOA object found.")
-        return
-
-    # set temporary value as pointer to the moving window
-    window = tdoa_roster[counter].mWindow
-
-    # Calculate IQR for outlier detection
-    window_values = window.get_values()
-
-    # Get weighted average and add to the window
-    if len(window_values) == MOVING_WINDOW_SIZE:
-        avg = window.get_weighted_average()
-
-    # Add new TDoA data to moving window and update weighted average
-    window.add_value(newTdoa)
 
     if len(window_values) == MOVING_WINDOW_SIZE:
         tdoa_roster[counter].estimate = window.get_median()
@@ -296,33 +277,48 @@ their intersection at which the tag is most likely to be positioned.
 Returns the new location estimate
 """
 def localizer(estimatedPosition, tdoa_12, tdoa_13, tdoa_14, tdoa_23, tdoa_24, tdoa_34):
-    # print(f"Localizer reached. TDoA values: 12 = {tdoa_12}, 13 = {tdoa_13}, 14 = {tdoa_14}")
-    # print(f"                                23 = {tdoa_23}, 24 = {tdoa_24}, 34 = {tdoa_34}")
-    
     """
     Objective function is needed for least-squares optimization
 
     Calculates euclidean distance between last estimated position and base station positions. Subtracts
     the calculated tdoa value to determine how close new value is to estimated position
     """
+    # def objective_function(position):
+    #     differences = []
+
+    #     for tdoa in tdoa_roster:
+    #         i = tdoa.anchor1 - 1  # Adjust for 0-based indexing
+    #         j = tdoa.anchor2 - 1  # Adjust for 0-based indexing
+    #         estimate = tdoa.estimate
+    #         dist_i = np.linalg.norm(position - BASE_STATION_POS[i])
+    #         dist_j = np.linalg.norm(position - BASE_STATION_POS[j])
+    #         differences.append((dist_i - dist_j) - estimate)
+    
+    #     return differences
+
+    threshold = 0.01  # Example threshold, adjust as necessary
+    weight = 2  # Example weight, adjust as necessary
     def objective_function(position):
         differences = []
-
         for tdoa in tdoa_roster:
-            i = tdoa.anchor1 - 1  # Adjust for 0-based indexing
-            j = tdoa.anchor2 - 1  # Adjust for 0-based indexing
+            i = tdoa.anchor1 - 1
+            j = tdoa.anchor2 - 1
             estimate = tdoa.estimate
             dist_i = np.linalg.norm(position - BASE_STATION_POS[i])
             dist_j = np.linalg.norm(position - BASE_STATION_POS[j])
-            differences.append((dist_i - dist_j) - estimate)
-    
+            difference = (dist_i - dist_j) - estimate
+            # Apply a higher weight to the z-axis if needed
+            if np.abs(difference) > threshold:  # define a suitable threshold
+                difference *= weight  # adjust weight as necessary
+            differences.append(difference)
         return differences
+
     
     # Least squares calculation
     result = least_squares(objective_function, estimatedPosition)
 
     optimized_position = result.x
-    print("Optimized Position:", optimized_position)
+    # print("Optimized Position:", optimized_position)
     return optimized_position
 
 
@@ -408,20 +404,22 @@ for newPacket in read_packets(FILE_PATH):
         
         updateTdoaValues() function cross-checks with previously-tracked tdoa values and decides whether or not to update
         """
-        # tdoa_estimated = updateTdoaValues(tempPacket.id, remote.id, tdoa_raw * M_TICK)
-        tdoa_estimated = updateTdoaValues_TEMP(tempPacket.id, remote.id, tdoa_raw * M_TICK)
+        tdoa_estimated = updateTdoaValues(tempPacket.id, remote.id, tdoa_raw * M_TICK)
+        # tdoa_estimated = updateTdoaValues_TEMP(tempPacket.id, remote.id, tdoa_raw * M_TICK)
 
         """
         Debug printout: TDoA values
         """
-        if DEBUG:
+        if DEBUG and (tempPacket.id != remote.id):
             if tdoa_estimated is None:
+                # test = True
                 print(f"TDoA Raw:  {tempPacket.id} -> {remote.id}  = {tdoa_raw * M_TICK} meters")
             else:
-                if ((tdoa_estimated < 0) and (tdoa_raw > 0)) or ((tdoa_estimated > 0) and (tdoa_raw < 0)):
-                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {-tdoa_estimated} meters")
-                else:
-                    print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated} meters")
+                if((tempPacket.id == 1) and (remote.id == 2)):    #  or ((tempPacket.id == 2) and (remote.id == 1)
+                    if ((tdoa_estimated < 0) and (tdoa_raw > 0)) or ((tdoa_estimated > 0) and (tdoa_raw < 0)):
+                        print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {-tdoa_estimated} meters")
+                    else:
+                        print(f"TDoA Estimated:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated} meters")
         # previousTDOA = anchorList[tempPacket.id - 1].prevPacket.remoteList[remote.id - 1].tdoa
         # if((tempPacket.id == 2 and remote.id == 1) or (tempPacket.id == 1 and remote.id == 2)):
         #     print(f"TDoA:  {tempPacket.id} -> {remote.id}  = {tdoa_estimated * M_TICK} meters")
@@ -442,101 +440,59 @@ for newPacket in read_packets(FILE_PATH):
             localizer(estimatedPosition, tdoa_roster[0].estimate, tdoa_roster[1].estimate, tdoa_roster[2].estimate, 
                                      tdoa_roster[3].estimate, tdoa_roster[4].estimate, tdoa_roster[5].estimate)
 
+"""
+Here, we reached the end of the yaml file.
+
+Produce results for TDoA Noise measurements (standard deviation and variance).
+
+Produce results for Location estimates x, y, z (standard deviation and variance).
+"""
 
 
-        
 
-    """
-    Spare code below, ignore for now
-    """
 
-# def updateTdoaValues(anchor_id, remote_id, newTdoa):
-#     if remote_id == anchor_id: # id outlier filtering
+
+
+###########################
+##### END OF DOCUMENT #####
+###########################
+
+
+"""
+# Going pure averaging to try something here
+"""
+# def updateTdoaValues_TEMP(anchor_id, remote_id, newTdoa):
+#     if remote_id == anchor_id:  # id outlier filtering
 #         return None
 #     if remote_id < anchor_id:  # Flip these if needed
 #         tmp = anchor_id
 #         anchor_id = remote_id
 #         remote_id = tmp
+#         newTdoa *= -1       # if ids are flipped, tdoa value also needs to be flipped
+
 #     # iterate through list until correct TDOA object found
 #     counter = 0
 #     for element in tdoa_roster:
-#         if element.anchor1 == anchor_id:
-#             if element.anchor2 == remote_id:
-#                 break
+#         if element.anchor1 == anchor_id and element.anchor2 == remote_id:
+#             break
 #         counter += 1
+#     else:
+#         print("No matching TDOA object found.")
+#         return
+
 #     # set temporary value as pointer to the moving window
 #     window = tdoa_roster[counter].mWindow
-    
+
 #     # Calculate IQR for outlier detection
 #     window_values = window.get_values()
-#     if len(window_values) == 5:
-#         q1 = np.percentile(window_values, 25)
-#         q3 = np.percentile(window_values, 75)
-#         iqr = q3 - q1
-#         lower_bound = q1 - 1.5 * iqr
-#         upper_bound = q3 + 1.5 * iqr
-        
-#         if newTdoa < lower_bound or newTdoa > upper_bound:
-#             print(f"Outlier detected: {newTdoa} is outside the range [{lower_bound}, {upper_bound}]")
-#             return  # Do not add the outlier value to the window
-        
-#     # add new tdoa data to moving window
-#     tdoa_roster[counter].mWindow.add_value(newTdoa)
-#     if len(window_values) == 5:
-#         tdoa_roster[counter].estimate = tdoa_roster[counter].mWindow.get_median()
 
-#######################
+#     # Get weighted average and add to the window
+#     if len(window_values) == MOVING_WINDOW_SIZE:
+#         avg = window.get_weighted_average()
 
-    # for packet in yaml.load_all(sys.stdin, Loader=yaml.Loader):
-    # if not packet:
-    #     continue
+#     # Add new TDoA data to moving window and update weighted average
+#     window.add_value(newTdoa)
 
-    # data = {'id': packet['from'], 'tof': {}}
-
-    # for remote in packet['remoteAnchorData']:
-    #     if 'distance' in remote:
-    #         tof = remote['distance']
-    #         remote_id = remote['id']
-    #         if unit == 'ticks':
-    #             data['tof'][remote_id] = tof
-    #         if unit == 'meters':
-    #             data['tof'][remote_id] = tof * M_PER_TICK - ANTENNA_OFFSET
-    
-    #writePacket(1)
-    # check if respective anchor doesn't yet have a packet
-    
-    #if anchors[remoteID - 1].prevPacket.id is 0:
-
-    
-
-
-
-
-# for pack in read_packets(file_path):
-#     if 'remoteAnchorData' in pack:
-#         print(f"Packet Seq: {pack.get('seq', 'N/A')}")
-#         for anchor in pack['remoteAnchorData']:
-#             print(f" Anchor ID: {anchor['id']}, rxTimeStamp: {anchor['rxTimeStamp']}")
-
-# For Version 2 (piping output directly)
-"""
-for packet in yaml.load_all(sys.stdin, Loader=yaml.Loader):
-    if not packet:
-        continue
-
-    data = {'id': packet['from'], 'tof': {}}
-"""
-
-# Non-Kalman filter for tdoa outliers
-# # Just filters out outliers and averages the tdoa values
-# def tdoaLazyEstimator(anchor_id, remote_id, newTdoa):
-#     if anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa == 0:     # initial tracked tdoa is 0
-#         anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = newTdoa  # sets tracked tdoa to new packet value
-#         return 0
-#     prevTdoa = anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa
-#     if (prevTdoa / newTdoa) < TDOA_BOUND_LOW or (prevTdoa / newTdoa) > TDOA_BOUND_HIGH:    # outside acceptable bounds
-#         return 0
-#     tdoa_avg = (prevTdoa + newTdoa) / 2
-#     # anchorList[anchor_id - 1].prevPacket.remoteList[remote_id - 1].tdoa = tdoa_avg
-#     return tdoa_avg
-
+#     if len(window_values) == MOVING_WINDOW_SIZE:
+#         tdoa_roster[counter].estimate = window.get_median()
+#         return tdoa_roster[counter].estimate
