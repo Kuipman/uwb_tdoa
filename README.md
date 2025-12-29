@@ -82,10 +82,10 @@ Settings for downloading software to the node via Arduino IDE are undertaken as 
 <br>1: Connect the node to your system via USB. Port connectivity can be checked in the Tools tab of the Arduino IDE, or in your dev folder if you are on a Linux platform.
 <br>2: Note the two buttons on the node. Hold the left button down and press the right button. This will transition the node to DFU mode. (NOTE: The node may no longer be seen as an active port upon entering DFU mode. This is fine -- node can still program normally)
 <br>3: On Arduino IDE: (our node is the F072CBT6 series, yours may differ)
-	<br>Tools -> Board -> STM32 boards groups -> Generic STM32F0 series
-	<br>Tools -> Board part number -> Generic F072CBTx
-	<br>Tools -> U(S)ART Support -> Enabled (generic 'serial')
-	<br>Tools -> USB Support -> CDC (generic 'Serial' supersede U(S)ART)        (Not necessary, but fixed a serial printing issue)
-	<br>Tools -> Upload Method -> STM32CubeProgrammer (DFU)
-	Everything else -> Default
+	<br>&emspTools -> Board -> STM32 boards groups -> Generic STM32F0 series
+	<br>&emspTools -> Board part number -> Generic F072CBTx
+	<br>&emspTools -> U(S)ART Support -> Enabled (generic 'serial')
+	<br>&emspTools -> USB Support -> CDC (generic 'Serial' supersede U(S)ART)        (Not necessary, but fixed a serial printing issue)
+	<br>&emspTools -> Upload Method -> STM32CubeProgrammer (DFU)
+	<br>&emspEverything else -> Default
 <br>4: When your program is ready for upload, hit upload as you would for a regular Arduino microcontroller. If the console indicates several instances of "erasing sector" followed by "File Download Complete" you're good to go.
