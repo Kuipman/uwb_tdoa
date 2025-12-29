@@ -72,7 +72,7 @@ tdoa3MeasurementModel_v1.py
 (For TDoA3 Long Range): The anchors need to be configured with the radio mode "low bitrate, normal preamble" as well as TX power set to max. Instructions for how to achieve this are located here: https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/user-guides/tdoa3_long_range/
 
 
-## LPS Node Firmware Programming (i.e. not using proprietary modes and software)
+## LPS Node Firmware Programming
 
 (Loco Positioning Node - https://www.bitcraze.io/products/loco-positioning-node/)
 
