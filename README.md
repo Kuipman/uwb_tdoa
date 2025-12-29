@@ -1,6 +1,6 @@
 # UWB_TDoA3
 
-Project utilizing a Time Difference of Arrival (TDoA) system utilizing a receive-only mobile tag calculating its xyz coordinate using packet data sent from stationary base station modules.
+Project utilizing a Time Difference of Arrival (TDoA) system utilizing a receive-only mobile tag calculating its xyz coordinate using packet data sent from stationary base station modules. Test.
 
 UWB Nodes used are from the Loco Positioning System (see https://www.bitcraze.io/products/loco-positioning-node/)
 
