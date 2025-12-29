@@ -4,6 +4,8 @@ This project implements a GPS-free, autonomous position-estimation system based 
 
 Time Difference of Arrival (TDoA) is a radio-based localization technique in which the relative arrival times of wireless signals are used to estimate position. In a traditional TDoA configuration, a mobile node (tag) periodically transmits messages that are received by multiple fixed (anchor) nodes. Each anchor records the signal arrival time, and the differences between these timestamps are used to compute the tag’s position.
 
+![Image of Hyperbolic Localization using TDoA](/resources/Plots_Hyperbolas2.png)
+
 This project implements a reverse TDoA architecture. Instead of the mobile node transmitting, a set of static anchor nodes periodically transmit and exchange synchronized UWB messages among themselves. The mobile tag passively intercepts these transmissions and computes its own three-dimensional position using the embedded timing information and local reception timestamps. By shifting the computational and transmission burden away from the mobile node, this approach significantly reduces power consumption and system complexity on the tag while maintaining high localization accuracy. This makes the system well suited for autonomous robotics, embedded platforms, and long-duration deployments.
 
 This project is implemented as part of an undergraduate thesis for the department of Electrical and Computer Engineering at University of California Santa Cruz. The full thesis is available [here](/resources/A_Study_of_Ultra-Wideband_Localization_Using_Reverse_Time-Difference_of_Arrival__KuipersNS.pdf).
@@ -14,7 +16,14 @@ Nick Kuipers ([Kuipman](https://github.com/Kuipman))
 
 ## Status
 
+Project generates a 3D position estimation of a mobile node in real-time. Undergraduate thesis associated with this repository is complete as of June 2024.
+
 This library is currently (2024) **not actively maintained** by [Kuipman](https://github.com/Kuipman)
+
+Areas of improvement noted by author:
+<br>- Z-coordinate estimation has a large variance
+<br>- Python scripts can easily be combined
+<br>- TDoA tag firmware can filter out unnecessary packet information before being sent to Python scripts
 
 ## License
 
