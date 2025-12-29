@@ -72,13 +72,11 @@ tdoa3MeasurementModel_v1.py
 (For TDoA3 Long Range): The anchors need to be configured with the radio mode "low bitrate, normal preamble" as well as TX power set to max. Instructions for how to achieve this are located here: https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/user-guides/tdoa3_long_range/
 
 
-## Direct programming on the LPS Nodes (i.e. not using proprietary modes and software)
+## LPS Node Firmware Programming (i.e. not using proprietary modes and software)
 
 (Loco Positioning Node - https://www.bitcraze.io/products/loco-positioning-node/)
 
-The DW1000 Loco Positioning Node (hereafter referred to as simply the "node") operates using an STM32 microprocessor. Interfacing with this processor can be performed within the Arduino IDE provided you install the STM32duino extension. Similarly, interfacing with this processor can be accomplished in Visual Studio Code with the Arduino extension + the STM32duino add-on.
-
-You will also need the STM32 Cube Programmer, downloaded separately.
+The LPS node operates using an STM32 microprocessor. Interfacing with this processor can be performed with VSCode and/or Arduino IDE provided you install the STM32duino extension. You will also need the STM32 Cube Programmer, downloaded separately.
 
 Settings for downloading software to the node via Arduino IDE are undertaken as follows:
 1: Connect the node to your system via USB. Port connectivity can be checked in the Tools tab of the Arduino IDE, or in your dev folder if you are on a Linux platform.
