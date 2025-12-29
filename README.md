@@ -12,7 +12,7 @@ This project is implemented as part of an undergraduate thesis for the departmen
 
 ## Author
 
-Nick Kuipers ([Kuipman](https://github.com/Kuipman))
+Nick Kuipers ([Kuipman](https://github.com/Kuipman)) 
 
 ## Status
 
@@ -89,5 +89,5 @@ Settings for downloading software to the node via Arduino IDE are undertaken as 
 	- Tools -> USB Support -> CDC (generic 'Serial' supersede U(S)ART)        *(Not necessary, but fixed a serial printing issue)*
 	- Tools -> Upload Method -> STM32CubeProgrammer (DFU)
 	- Everything else -> Default
-	
+
 <br>4: When your program is ready for upload, hit upload as you would for a regular Arduino microcontroller. If the console indicates several instances of "erasing sector" followed by "File Download Complete" you're good to go.
