@@ -1,9 +1,0 @@
-#!/usr/bin/env python3
-import subprocess
-
-try:
-    subprocess.check_call(['python3', '-m', 'flake8', 'lpstools'])
-    print('verify pass')
-except subprocess.CalledProcessError as e:
-    print('Error: verify fail')
-    raise e
