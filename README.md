@@ -22,7 +22,7 @@ A Dell laptop was physically connected to the mobile platform and served as the 
 
 # Software
 
-Loco Positioning System base firmware pulled from Bitcraze (see https://github.com/bitcraze/lps-node-firmware). The base firmware includes operational modes for Two-Way Ranging (TWR) and Transmit-Only TDoA at the mobile node. This project adds the capability for the mobile node to receive, process, and forward base station messages over serial port as part of Receive-Only TDoA. This portion of the implementation can be found in the <ul>lpsTdoa3Tag</ul> library in src/.
+Loco Positioning System base firmware pulled from Bitcraze (see https://github.com/bitcraze/lps-node-firmware). The base firmware includes operational modes for Two-Way Ranging (TWR) and Transmit-Only TDoA at the mobile node. This project adds the capability for the mobile node to receive, process, and forward base station messages over serial port as part of Receive-Only TDoA. This portion of the implementation can be found in the <u>lpsTdoa3Tag</u> library in src/.
 
 The remainder of Receive-Only TDoA is performed at the laptop-side (simulating the mobile device's OS) using a set of Python scripts. These receive base station messages over serial from the mobile LPS node, convert them to Time-of-Flight (ToF) and equivalent distance (in meters) measurements, and uses Least-Squares approximation to estimate the 3D position of the mobile node in real-time. The complete software stack operates as follows:
 
