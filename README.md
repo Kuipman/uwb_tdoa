@@ -1,10 +1,20 @@
 # UWB_TDoA3
 
-This project implements a GPS-free, autonomous position-estimation system based on Ultra-Wideband (UWB) Time Difference of Arrival (TDoA) localization. The system is designed for environments where GPS is unreliable or unavailable, such as indoor spaces, dense vegetation, or cluttered industrial settings.
+This project implements a GPS-free, autonomous position-estimation system based on Ultra-Wideband (UWB) Time Difference of Arrival (TDoA) localization. The system is specifically designed for environments in which GPS is unreliable or unavailable, including indoor spaces, dense vegetation, and cluttered or infrastructure-heavy industrial settings.
 
-The localization architecture consists of a receive-only mobile tag and multiple stationary UWB base station nodes. Each base station periodically transmits UWB packets containing precise timing information. The mobile tag passively listens to these transmissions and computes its three-dimensional position (x, y, z) by measuring the relative arrival times of packets from different anchors and solving the resulting TDoA equations.
+Time Difference of Arrival (TDoA) is a radio-based localization technique in which the relative arrival times of wireless signals are used to estimate position. In a traditional TDoA configuration, a mobile node (tag) periodically transmits messages that are received by multiple fixed (anchor) nodes. Each anchor records the signal arrival time, and the differences between these timestamps are used to compute the tag’s position.
 
-This approach minimizes power consumption and system complexity on the mobile node while maintaining high localization accuracy, making it well-suited for autonomous robotics, embedded systems, and long-duration deployments.
+This project implements a reverse TDoA architecture. Instead of the mobile node transmitting, a set of static anchor nodes periodically transmit and exchange synchronized UWB messages among themselves. The mobile tag passively intercepts these transmissions and computes its own three-dimensional position using the embedded timing information and local reception timestamps. By shifting the computational and transmission burden away from the mobile node, this approach significantly reduces power consumption and system complexity on the tag while maintaining high localization accuracy. This makes the system well suited for autonomous robotics, embedded platforms, and long-duration deployments.
+
+This project is implemented as part of an undergraduate thesis for the department of Electrical and Computer Engineering at University of California Santa Cruz. The full thesis is available [here](/resources/A_Study_of_Ultra-Wideband_Localization_Using_Reverse_Time-Difference_of_Arrival__KuipersNS.pdf).
+
+## Author
+
+Nick Kuipers ([Kuipman](https://github.com/Kuipman))
+
+## Status
+
+This library is currently (2024) **not actively maintained** by ([Kuipman](https://github.com/Kuipman))
 
 ## License
 
@@ -46,8 +56,6 @@ tdoa3MeasurementModel_v1.py
 
 ## Configuring the Loco Positioning System Nodes for TDoA3
 
-Time Difference of Arrival (TDoA) is a ranging setup in which a series of static anchors exchange ranging messages and a sniffer node "sniffs" or listens to these messages.
-
 (Configuring the LPS via Console Menu): Through a simple serial connection an LPS node can be configured on a serial console. With a device connected and its port known, you can use the command "picocom /dev/'PORT'" in your terminal. Further instructions can be found here: https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/development/anchor-low-level-config/
 
 (TDoA3 Configuration): The anchors and sniffer must be configured to the same bitrate and preamble length. By default, these are both "normal". This can be changed in the console menu.
@@ -55,7 +63,7 @@ Time Difference of Arrival (TDoA) is a ranging setup in which a series of static
 (For TDoA3 Long Range): The anchors need to be configured with the radio mode "low bitrate, normal preamble" as well as TX power set to max. Instructions for how to achieve this are located here: https://www.bitcraze.io/documentation/repository/lps-node-firmware/master/user-guides/tdoa3_long_range/
 
 
-## Operation Instructions for direct programming on the LPS Nodes (i.e. not using proprietary modes and software)
+## Direct programming on the LPS Nodes (i.e. not using proprietary modes and software)
 
 (Loco Positioning Node - https://www.bitcraze.io/products/loco-positioning-node/)
 
@@ -74,5 +82,3 @@ Settings for downloading software to the node via Arduino IDE are undertaken as 
 	Tools -> Upload Method -> STM32CubeProgrammer (DFU)
 	Everything else -> Default
 4: When your program is ready for upload, hit upload as you would for a regular Arduino microcontroller. If the console indicates several instances of "erasing sector" followed by "File Download Complete" you're good to go.
-	
-
