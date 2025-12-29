@@ -1,14 +1,48 @@
 # UWB_TDoA3
 
-Project utilizing a Time Difference of Arrival (TDoA) system utilizing a receive-only mobile tag calculating its xyz coordinate using packet data sent from stationary base station modules. Test.
+This project implements a GPS-free, autonomous position-estimation system based on Ultra-Wideband (UWB) Time Difference of Arrival (TDoA) localization. The system is designed for environments where GPS is unreliable or unavailable, such as indoor spaces, dense vegetation, or cluttered industrial settings.
 
-UWB Nodes used are from the Loco Positioning System (see https://www.bitcraze.io/products/loco-positioning-node/)
+The localization architecture consists of a receive-only mobile tag and multiple stationary UWB base station nodes. Each base station periodically transmits UWB packets containing precise timing information. The mobile tag passively listens to these transmissions and computes its three-dimensional position (x, y, z) by measuring the relative arrival times of packets from different anchors and solving the resulting TDoA equations.
 
-Manual DW1000 source pulled from library by thotro (see https://github.com/thotro/arduino-dw1000). Library contains basic functionalities for Decawave's DW1000 chips/modules with Arduino. (DW1000 - https://www.decawave.com/products/dwm1000-module)
+This approach minimizes power consumption and system complexity on the mobile node while maintaining high localization accuracy, making it well-suited for autonomous robotics, embedded systems, and long-duration deployments.
 
 ## License
 
 Apache 2.0 (see LICENSE)
+
+## Hardware
+
+The localization system is built using Ultra-Wideband (UWB) nodes from the Bitcraze Loco Positioning System (LPS) (see https://www.bitcraze.io/products/loco-positioning-node/), which are based on Decawave’s DW1000 UWB transceiver and provide the timing precision required for Time Difference of Arrival (TDoA) positioning.
+
+Multiple stationary base-station nodes (anchors) were deployed at known, fixed locations within the test environment. Each anchor was mounted on a tripod using custom 3D-printed mounting brackets, allowing for flexible placement, repeatable geometry, and accurate measurement of anchor coordinates.
+
+The mobile node (tag) was mounted on a dummy aerial platform to emulate a real-world robotic payload (e.g., a drone or mobile robot). This configuration allowed the system to be tested under realistic physical constraints without risking damage to an operational vehicle.
+
+A Dell laptop was physically connected to the mobile platform and served as the primary computation unit. It received UWB packet timing data from the mobile node and performed real-time position estimation, including TDoA computation and multilateration to determine the mobile node’s three-dimensional position.
+
+# Software
+
+Loco Positioning System base firmware pulled from Bitcraze (see https://github.com/bitcraze/lps-node-firmware). The base firmware includes operational modes for Two-Way Ranging (TWR) and Transmit-Only TDoA at the mobile node. This project adds the capability for the mobile node to receive, process, and forward base station messages over serial port as part of Receive-Only TDoA. This portion of the implementation can be found in the lpsTdoa3Tag library in src/.
+
+The remainder of Receive-Only TDoA is performed at the laptop-side (simulating the mobile device's OS) using a set of Python scripts. These receive base station messages over serial from the mobile LPS node, convert them to Time-of-Flight (ToF) and equivalent distance (in meters) measurements, and uses Least-Squares approximation to estimate the 3D position of the mobile node in real-time. The complete software stack operates as follows:
+
+```
+LPS Firmware
+    |
+	| (ranging packets)
+	|
+	V
+tdoa3PacketBuilder.py
+    |
+	| (ToF/Meter ranges)
+	|
+	V
+tdoa3MeasurementModel_v1.py
+    |
+	|
+	V
+*3D Position Estimation*
+```
 
 ## Configuring the Loco Positioning System Nodes for TDoA3
 
