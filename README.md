@@ -14,7 +14,7 @@ Nick Kuipers ([Kuipman](https://github.com/Kuipman))
 
 ## Status
 
-This library is currently (2024) **not actively maintained** by ([Kuipman](https://github.com/Kuipman))
+This library is currently (2024) **not actively maintained** by [Kuipman](https://github.com/Kuipman)
 
 ## License
 
